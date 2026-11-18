@@ -65,21 +65,38 @@ jobs:
             cp -a "$root/." "$W/"
           }
 
-          # 优先用官方 main 分支源码现场构建
-          if git clone --depth 1 -q https://github.com/deepseek-ai/chat-demo.git /tmp/src; then
-            if (cd /tmp/src && pnpm install --frozen-lockfile && pnpm build); then
-              norm /tmp/src/dist
+          if [ -f chat-demo-source.zip ]; then
+            echo "== 使用仓库里的 chat-demo-source.zip 构建（含新增功能）=="
+            rm -rf /tmp/src
+            mkdir -p /tmp/src
+            unzip -q -o chat-demo-source.zip -d /tmp/src
+            ROOT=/tmp/src
+            if [ ! -f "$ROOT/package.json" ]; then
+              pkg=$(find /tmp/src -maxdepth 2 -name package.json | head -n 1)
+              if [ -n "$pkg" ]; then ROOT=$(dirname "$pkg"); fi
             fi
-          fi
-
-          # 源码构建没成功，就退回官方预编译包
-          if [ ! -f "$W/index.html" ]; then
-            echo "源码构建未成功，改用官方预编译包 v0.1.1"
-            curl -fsSL -o /tmp/dist.zip https://github.com/deepseek-ai/chat-demo/releases/download/v0.1.1/chat-demo-v0.1.1.zip
-            rm -rf /tmp/www
-            mkdir -p /tmp/www
-            unzip -q -o /tmp/dist.zip -d /tmp/www
-            norm /tmp/www
+            echo "源码目录：$ROOT"
+            (cd "$ROOT" && pnpm install --frozen-lockfile && pnpm build)
+            norm "$ROOT/dist"
+            if grep -rq "此前对话摘要" "$W"; then
+              echo "✓ 新功能已进入构建产物"
+            else
+              echo "⚠ 产物里没有找到新功能标记（可能被转义压缩），以安装后的界面为准"
+            fi
+          else
+            echo "== 没有源码包，退回官方源码 / 预编译包 =="
+            if git clone --depth 1 -q https://github.com/deepseek-ai/chat-demo.git /tmp/upstream; then
+              if (cd /tmp/upstream && pnpm install --frozen-lockfile && pnpm build); then
+                norm /tmp/upstream/dist
+              fi
+            fi
+            if [ ! -f "$W/index.html" ]; then
+              curl -fsSL -o /tmp/dist.zip https://github.com/deepseek-ai/chat-demo/releases/download/v0.1.1/chat-demo-v0.1.1.zip
+              rm -rf /tmp/www
+              mkdir -p /tmp/www
+              unzip -q -o /tmp/dist.zip -d /tmp/www
+              norm /tmp/www
+            fi
           fi
 
           if [ ! -f "$W/index.html" ]; then
@@ -138,8 +155,8 @@ jobs:
                   applicationId 'com.deepseek.chatdemo'
                   minSdk 26
                   targetSdk 34
-                  versionCode 1
-                  versionName '0.1.1'
+                  versionCode 2
+                  versionName '0.2.0'
               }
 
               signingConfigs {
@@ -567,7 +584,7 @@ jobs:
       - name: 12. 整理产物
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/release/app-release.apk "out/chat-demo-${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "out/chat-demo-v0.2-${{ github.run_number }}.apk"
           ls -lh out
           sha256sum out/*.apk
 
@@ -584,7 +601,7 @@ jobs:
           tag_name: apk-latest
           name: chat-demo APK
           body: chat-demo 的 Android 安装包，由 GitHub Actions 自动构建。
-          files: out/chat-demo-${{ github.run_number }}.apk
+          files: out/chat-demo-v0.2-${{ github.run_number }}.apk
           make_latest: true
 
       - name: 15. 打印下载地址
